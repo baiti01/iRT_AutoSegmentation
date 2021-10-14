@@ -1,0 +1,87 @@
+AUTO_RESUME: True
+WORKERS: 12
+OUTPUT_DIR: 'output'
+LOG_DIR: 'log'
+
+CUDNN:
+  BENCHMARK: true
+  DETERMINISTIC: false
+  ENABLED: true
+
+DATASET:
+  NAME: 'IPA'
+  #ROOT: 'D:\data\0_curated_data\segmentation\3_Pelvis\IPA'
+  ROOT: './data'
+  TRAIN_LIST: 'IPA_train.txt'
+  VAL_LIST: 'IPA_test.txt'
+  TEST_LIST: 'IPA_test.txt'
+  TARGET_SIZE:
+    - 128
+    - 512
+    - 512
+  RESOLUTION:
+    - 2.5
+    - 1.17
+    - 1.17
+
+  RANDOM_CROP_SIZE:
+    - 192
+    - 384
+    - 384
+  ROTATION_RADIUS_PROBABILITY_ANGLE:
+    - 1.0
+    - 0.01
+    - 0.01
+    - 0.05
+  ZOOM_PROBABILITY_MIN_MAX_RATIO:
+    - 1.0
+    - 0.9
+    - 1.1
+
+MODEL:
+  NAME: 'IPAModel'
+  GENERATOR:
+    NAME: 'UNet_MONAI'
+    DIMENSIONS: 3
+    INPUT_CHANNELS: 1
+    OUTPUT_CHANNELS: 9
+    CHANNELS: (16, 32, 64, 128, 256)
+    STRIDES: (2, 2, 2, 2)
+    NUM_RES_UNITS: 2
+
+CRITERION:
+  PIXEL_WISE_LOSS_TYPE: 'ClassSpatialMaskedDiceLoss'
+
+TRAIN:
+  BATCHSIZE_PER_GPU: 1
+  TOTAL_ITERATION: 1e5
+  PRINT_FREQUENCY: 1.0
+  DISPLAY_FREQUENCY: 1000
+  CHECKPOINT: ''
+  OPTIMIZER: adam
+
+  # learning rate policy
+  LR_POLICY: 'MultiStepLR'
+  LR_FACTOR: 0.1
+  LR_STEP:
+    - 50000
+    - 75000
+  GENERATOR:
+    LR: 3e-4
+
+  # for adam
+  GAMMA1: 0.9
+  GAMMA2: 0.999
+
+VAL:
+  BATCHSIZE_PER_GPU: 1
+  EVALUATION_FREQUENCY: 1000
+  PRINT_FREQUENCY: 1.0
+  SHUFFLE: false
+  MODEL_FILE: ''
+
+TEST:
+  BATCHSIZE_PER_GPU: 1
+  IS_VOLUME_VISUALIZER: True
+  SHUFFLE: false
+  MODEL_FILE: ''
