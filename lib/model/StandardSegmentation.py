@@ -6,59 +6,103 @@
 # DATETIME: 7/21/2020 7:02 PM
 
 # sys
-import logging
-
-import torch
 from easydict import EasyDict as edict
 
 # monai
 from monai.metrics import compute_meandice
 from monai.networks.utils import one_hot
+from monai.transforms import AsDiscrete
+
+# torch
+import torch
+from torch.cuda.amp import GradScaler, autocast
 
 # project
 from lib.model.base_model import BaseModel
-from lib.model.utils.networks import define_generator
+from lib.model.module.networks import define_generator
 from lib.utils.utils import AverageMeter
 
-logger = logging.getLogger(__name__)
 
-
-class IPAModel(BaseModel):
+class StandardSegmentation(BaseModel):
     def __init__(self,
                  optimizer_option,
                  criterion_option,
                  scheduler_option,
+                 logger,
                  cfg=None,
                  is_train=True
                  ):
-        super(IPAModel, self).__init__(is_train=is_train)
+        super(StandardSegmentation, self).__init__(logger, is_train=is_train)
 
         self.generator = define_generator(cfg.MODEL.GENERATOR)
         self._create_optimize_engine(optimizer_option, criterion_option, scheduler_option)
+        self.asdiscrete = AsDiscrete(argmax=True, to_onehot=cfg.DATASET.NUM_CLASSES)
         self.cfg = cfg
+        self.amp = cfg.AUTOMATIC_MIXED_PRECISION
+        if self.amp:
+            self.scaler = GradScaler()
+
+    def set_dataset(self, input):
+        if hasattr(self, 'target'):
+            del self.target
+
+        if isinstance(input['data'], list):
+            self.input = [x['image'] for x in input['data']]
+            self.input = torch.cat(self.input, dim=0)
+            self.target = [x['label'] for x in input['data']]
+            self.target = torch.cat(self.target, dim=0)
+        else:
+            self.input = input['data']['image']
+            self.target = input['data']['label']
+
+        if torch.cuda.is_available():
+            self.input = self.input.cuda()
+            self.target = self.target.cuda()
+
+        self.unique_idx = torch.unique(self.target).long()
+        self.target = one_hot(self.target, num_classes=self.cfg.MODEL.GENERATOR.OUTPUT_CHANNELS)
+        self.target.requires_grad = False
+        if len(self.unique_idx) == 1:
+            return -1
+        return 0
 
     def forward(self):
-        self.output = self.generator(self.input)
+        if self.amp:
+            with autocast():
+                self.output = self.generator(self.input)
+        else:
+            self.output = self.generator(self.input)
+
+        del self.input
 
     def loss_calculation(self):
-        unique_label_idx = torch.unique(self.target)
-        if len(unique_label_idx) == 1:
-            return -1
-        self.target = one_hot(self.target, num_classes=self.cfg.MODEL.GENERATOR.OUTPUT_CHANNELS)
-        self.class_spatial_mask = torch.zeros_like(self.target)
-        self.class_spatial_mask[:, unique_label_idx.long()] = 1
-        self.loss = self.criterion_pixel_wise_loss(self.output, self.target, self.class_spatial_mask)
-        self.loss = self.loss * (self.cfg.MODEL.GENERATOR.OUTPUT_CHANNELS - 1) / (len(unique_label_idx) - 1)
+        if self.amp:
+            with autocast():
+                self.loss = self.criterion_pixel_wise_loss(self.output, self.target)
+        else:
+            self.loss = self.criterion_pixel_wise_loss(self.output, self.target)
         return 0
 
     def optimize_parameters(self):
         self.forward()
         is_success = self.loss_calculation()
+        del self.output
+        del self.target
+
         if is_success == -1:
             return -1
         self.optimizer_generator.zero_grad()
-        self.loss.backward()
-        self.optimizer_generator.step()
+
+        if self.amp:
+            self.scaler.scale(self.loss).backward()
+            self.scaler.unscale_(self.optimizer_generator)
+            torch.nn.utils.clip_grad_norm(self.generator.parameters(), 0.5)
+            self.scaler.step(self.optimizer_generator)
+            self.scaler.update()
+        else:
+            self.loss.backward()
+            torch.nn.utils.clip_grad_norm(self.generator.parameters(), 0.5)
+            self.optimizer_generator.step()
         return 0
 
     def record_information(self, current_iteration=None, data_loader_size=None, batch_time=None, data_time=None,
@@ -87,8 +131,14 @@ class IPAModel(BaseModel):
                 self.losses_val = AverageMeter()
                 self.DSC = AverageMeter()
             self.losses_val.update(self.loss.item())
-            current_DSC = compute_meandice(self.output > 0, self.target, include_background=False)
+
+            self.output = self.asdiscrete(self.output[0, ...])[None, ...]
+            current_DSC = compute_meandice(self.output, self.target, include_background=False)
             self.DSC.update(current_DSC.detach().cpu().numpy())
+
+            del current_DSC
+            del self.output
+            del self.target
 
             if current_iteration == data_loader_size - 1:
                 global_steps = writer_dict['val_global_steps']
@@ -98,21 +148,30 @@ class IPAModel(BaseModel):
             if current_iteration % self.cfg.VAL.PRINT_FREQUENCY == 0:
                 msg = 'Val: [{0}/{1}]\t' \
                       'Loss {losses.val:.5f} ({losses.avg:.5f})\t' \
-                      'DSC {DSCes.val[0]} ({DSCes.avg})'.format(
+                      'DSC {DSC_val} ({DSC_avg})'.format(
                     current_iteration, data_loader_size,
                     losses=self.losses_val,
-                    DSCes=self.DSC)
+                    DSC_val=[float('{:.3f}'.format(x * 100)) for x in list(self.DSC.val[0])],
+                    DSC_avg=[float('{:.3f}'.format(x * 100)) for x in list(self.DSC.avg)]
+                )
         else:
             raise ValueError('Unknown operation in information recording!')
-        logger.info(msg)
+        self.logger.info(msg)
         return self.losses_val.avg
 
 
-def get_model(cfg, is_train=True):
+def get_model(cfg, logger, is_train=True):
     optimizer_option = edict({'optimizer': cfg.TRAIN.OPTIMIZER,
                               'generator_lr': cfg.TRAIN.GENERATOR.LR,
+
+                              # adam
                               'beta1': cfg.TRAIN.GAMMA1,
-                              'beta2': cfg.TRAIN.GAMMA2})
+                              'beta2': cfg.TRAIN.GAMMA2,
+
+                              # sgd
+                              'momentum': cfg.TRAIN.MOMENTUM,
+                              'nesterov': cfg.TRAIN.NESTEROV,
+                              'weight_decay': cfg.TRAIN.WEIGHT_DECAY})
 
     criterion_option = edict({
         'pixel_wise_loss_type': cfg.CRITERION.PIXEL_WISE_LOSS_TYPE,
@@ -121,12 +180,14 @@ def get_model(cfg, is_train=True):
     scheduler_option = edict({'niter_decay': int(cfg.TRAIN.TOTAL_ITERATION),
                               'lr_policy': cfg.TRAIN.LR_POLICY,
                               'lr_decay_iters': cfg.TRAIN.LR_STEP,
+                              'poly_exponent': cfg.TRAIN.POLY_LR_POLICY_EXPONENT,
                               'last_iteration': -1})
 
-    model = IPAModel(optimizer_option=optimizer_option,
-                     criterion_option=criterion_option,
-                     scheduler_option=scheduler_option,
-                     cfg=cfg,
-                     is_train=is_train)
+    model = StandardSegmentation(optimizer_option=optimizer_option,
+                                 criterion_option=criterion_option,
+                                 scheduler_option=scheduler_option,
+                                 cfg=cfg,
+                                 is_train=is_train,
+                                 logger=logger)
 
     return model

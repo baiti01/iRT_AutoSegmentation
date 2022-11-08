@@ -1,6 +1,7 @@
+import os
+
 import dominate
 from dominate.tags import meta, h3, table, tr, td, p, a, img, br
-import os
 
 
 class HTML:
@@ -11,7 +12,7 @@ class HTML:
      It is based on Python library 'dominate', a Python library for creating and manipulating HTML documents using a DOM API.
     """
 
-    def __init__(self, web_dir, title, refresh=0):
+    def __init__(self, web_dir, title, table_columns=None, refresh=0):
         """Initialize the HTML classes
 
         Parameters:
@@ -19,6 +20,7 @@ class HTML:
             title (str)   -- the webpage name
             refresh (int) -- how often the website refresh itself; if 0; no refreshing
         """
+        self.table_columns = table_columns
         self.title = title
         self.web_dir = web_dir
         self.img_dir = os.path.join(self.web_dir, 'images')
@@ -56,21 +58,42 @@ class HTML:
         self.t = table(border=1, style="table-layout: fixed;")  # Insert a table
         self.doc.add(self.t)
         with self.t:
-            with tr():
-                for im, txt, link in zip(ims, txts, links):
-                    with td(style="word-wrap: break-word;", halign="center", valign="top"):
-                        with p():
-                            with a(href=os.path.join('images', link)):
-                                #img(style="width:%dpx" % width, src=os.path.join('images', im))
-                                img(style="height:%dpx" % height, src=os.path.join('images', im))
-                            #with a(href=link):
-                            #    img(style="width:%dpx" % width, src=im)
-                            br()
-                            p(txt)
+            if self.table_columns is None:
+                with tr():
+                    for im, txt, link in zip(ims, txts, links):
+                        with td(style="word-wrap: break-word;", halign="center", valign="top"):
+                            with p():
+                                with a(href=os.path.join('images', link)):
+                                    # img(style="width:%dpx" % width, src=os.path.join('images', im))
+                                    img(style="height:%dpx" % height, src=os.path.join('images', im))
+                                # with a(href=link):
+                                #    img(style="width:%dpx" % width, src=im)
+                                br()
+                                p(txt)
+            else:
+                rows = int(len(ims) // self.table_columns)
+                for current_row in range(rows):
+                    starting_idx = current_row * self.table_columns
+                    ending_idx = (current_row + 1) * self.table_columns
+                    with tr():
+                        for im, txt, link in zip(ims[starting_idx:ending_idx], txts[starting_idx:ending_idx],
+                                                 links[starting_idx:ending_idx]):
+                            with td(style="word-wrap: break-word;", halign="center", valign="top"):
+                                with p():
+                                    with a(href=os.path.join('images', link)):
+                                        # img(style="width:%dpx" % width, src=os.path.join('images', im))
+                                        img(style="height:%dpx" % height, src=os.path.join('images', im))
+                                    # with a(href=link):
+                                    #    img(style="width:%dpx" % width, src=im)
+                                    br()
+                                    p(txt)
 
-    def save(self):
+    def save(self, prefix=None):
         """save the current content to the HMTL file"""
-        html_file = '%s/index.html' % self.web_dir
+        if prefix is None:
+            html_file = '{}/index.html'.format(self.web_dir)
+        else:
+            html_file = '{}/{}_index.html'.format(self.web_dir, prefix)
         f = open(html_file, 'wt')
         f.write(self.doc.render())
         f.close()

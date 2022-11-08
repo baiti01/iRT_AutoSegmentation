@@ -5,12 +5,13 @@
 # DATETIME: 8/12/2019 3:43 PM
 
 # sys
+import logging
 import os
 import time
 
 # project
-from lib.utils.utils import AverageMeter, save_checkpoint
 from lib.engine.validate_engine import do_validate
+from lib.utils.utils import AverageMeter, save_checkpoint
 
 
 def do_train(train_loader,
@@ -52,17 +53,20 @@ def do_train(train_loader,
                 output_dictionary['generator'] = model.generator.state_dict()
                 output_dictionary['optimizer_generator'] = model.optimizer_generator.state_dict()
 
-            if hasattr(model, 'discriminator'):
-                output_dictionary['discriminator'] = model.discriminator.state_dict()
-                output_dictionary['optimizer_discriminator'] = model.optimizer_discriminator.state_dict()
-
             save_checkpoint(output_dictionary, indicator_dict, final_output_dir)
             model.train()
 
         # train
-        model.set_dataset(current_data)
+        is_success = model.set_dataset(current_data)
+        if is_success == -1:
+            logging.info('Failed to setup current training sample: {}.'
+                         'Go to next one ...'.format(current_data['path'][0]))
+            continue
+
         is_success = model.optimize_parameters()
         if is_success == -1:
+            logging.info(
+                'Failed to update the model parameters: {}. Go to next one ...'.format(current_data['path'][0]))
             continue
 
         # visualize
@@ -78,4 +82,5 @@ def do_train(train_loader,
 
         batch_time.update(time.time() - end)
         end = time.time()
-        model.record_information(i, len(train_loader), batch_time, data_time, indicator_dict, writer_dict, phase='train')
+        model.record_information(i, len(train_loader), batch_time, data_time, indicator_dict, writer_dict,
+                                 phase='train')

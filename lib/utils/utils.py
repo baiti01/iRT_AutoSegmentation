@@ -6,8 +6,11 @@
 # sys
 import os
 import time
-import logging
 from pathlib import Path
+import logging
+from imp import reload
+reload(logging)
+
 import numpy as np
 
 # torch
@@ -15,7 +18,7 @@ import torch
 
 
 def epoch_iteration_calculation(total_iterations, batch_size, length_dataset, drop_last=False):
-    iteration_per_epoch = length_dataset/batch_size
+    iteration_per_epoch = length_dataset / batch_size
     iteration_per_epoch = np.floor(iteration_per_epoch) if drop_last else np.ceil(iteration_per_epoch)
     total_epochs = np.ceil(total_iterations / iteration_per_epoch)
     return total_epochs, iteration_per_epoch
@@ -27,7 +30,7 @@ def save_checkpoint(states, indicator_dict, output_dir,
 
     with open(os.path.join(output_dir, 'model_info.log'), 'a') as f:
         current_line = 'checkpoint: \t {} \t {:.8f} \t'.format(indicator_dict['current_iteration'],
-                                                              indicator_dict['current_performance'])
+                                                               indicator_dict['current_performance'])
         is_best_info = 'is_best' if indicator_dict['is_best'] else 'no_best'
         current_line = current_line + is_best_info + '\n'
         f.write(current_line)
@@ -67,18 +70,19 @@ def create_logger(cfg, cfg_name):
     head = '%(asctime)-15s %(message)s'
     logging.basicConfig(filename=str(final_log_file),
                         format=head)
-    logger = logging.getLogger()
+    logger = logging.getLogger(__name__)
     logger.setLevel(logging.INFO)
+    #logger.propagate = False
     console = logging.StreamHandler()
     logging.getLogger('').addHandler(console)
 
     tensorboard_log_dir = root_output_dir / dataset / cfg_name / time_str / 'tensorboard_log'
-    print('=> creating {}'.format(tensorboard_log_dir))
+    logger.info('=> creating {}'.format(tensorboard_log_dir))
     tensorboard_log_dir.mkdir(parents=True, exist_ok=True)
 
     # create folder to save key files for result reproducibility
     key_files_dir = root_output_dir / dataset / cfg_name / time_str / 'key_files'
-    print('=> creating {}'.format(key_files_dir))
+    logger.info('=> creating {}'.format(key_files_dir))
     key_files_dir.mkdir(parents=True, exist_ok=True)
 
     return logger, str(final_output_dir), str(tensorboard_log_dir), str(key_files_dir)
@@ -99,13 +103,14 @@ class AverageMeter(object):
     def update(self, val):
         self.val = val
         self.history.append(self.val)
-        if isinstance(self.val, (np.ndarray, np.generic)):
+        if isinstance(self.val, np.ndarray):
             np_history = np.concatenate(self.history)
             self.avg = np.nanmean(np_history, axis=0)
             self.total_avg = np.nanmean(np_history)
         else:
             self.avg = np.nanmean(self.history)
             self.total_avg = self.avg
+
 
 def accuracy(output, target, topk=(1,)):
     """Computes the precision@k for the specified values of k"""
@@ -121,4 +126,3 @@ def accuracy(output, target, topk=(1,)):
         correct_k = correct[:k].view(-1).float().sum(0)
         res.append(correct_k.mul_(100.0 / batch_size))
     return res
-

@@ -10,8 +10,8 @@ import warnings
 from typing import Callable, Optional, Union
 
 import torch
-from torch.nn.modules.loss import _Loss
 from monai.losses import DiceLoss
+from torch.nn.modules.loss import _Loss
 
 
 class ClassSpatialMaskedLoss(_Loss):
@@ -52,7 +52,8 @@ class ClassSpatialMaskedLoss(_Loss):
             raise ValueError(f"Batch size of mask ({mask.shape}) must be one or equal to input ({input.shape}).")
         if target.dim() > 1:
             if input.shape[1:] != mask.shape[1:]:
-                warnings.warn(f"Spatial size and channel size of input ({input.shape}) is different from mask ({mask.shape}).")
+                warnings.warn(
+                    f"Spatial size and channel size of input ({input.shape}) is different from mask ({mask.shape}).")
         return self.loss(torch.sigmoid(input) * mask, target * mask)
 
 

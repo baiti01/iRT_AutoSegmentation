@@ -1,0 +1,131 @@
+AUTO_RESUME: True
+WORKERS: 0
+OUTPUT_DIR: 'output'
+IS_VISUALIZE: true
+AUTOMATIC_MIXED_PRECISION: true
+
+CUDNN:
+  BENCHMARK: true
+  DETERMINISTIC: false
+  ENABLED: true
+
+DATASET:
+  NAME: 'AMOS22'
+  ROOT: './data'
+  JSON_FILE: 'CT.json'
+  TRAIN_KEY: 'training'
+  TEST_KEY:
+    - 'validation'
+  CROSS_VALIDATION_FOLDERS: 5
+  CROSS_VALIDATION_CURRENT_FOLDER: 0
+  CROSS_VALIDATION_RANDOM_SEED: 37
+
+  NUM_CLASSES: 16
+  TARGET_SIZE:
+    - 64
+    - 320
+    - 320
+
+  # data normalization
+  INTENSITY_MIN: -676.25
+  INTENSITY_MAX: 200.595
+  INTENSITY_CLIP: true
+
+  # data augmentation
+  RAND_AFFINE:
+    PROB: 0.2
+    ROTATION_RAD_ANGLE_ZYX:
+      - 0.26
+      - 0.26
+      - 0.26
+    SCALE_RANGE_ZYX:
+      - 0.2
+      - 0.2
+      - 0.2
+  RAND_GAUSSIAN_SMOOTH:
+    PROB: 0.2
+    SIGMA_X:
+      - 0.5
+      - 1.0
+    SIGMA_Y:
+      - 0.5
+      - 1.0
+    SIGMA_Z:
+      - 0.5
+      - 1.0
+  RAND_SCALE_INTENSITY:
+    PROB: 0.5
+    FACTORS: 0.3
+  RAND_SHIFT_INTENSITY:
+    PROB: 0.5
+    OFFSETS: 0.1
+  RAND_GAUSSIAN_NOISE:
+    PROB: 0.2
+    MEAN: 0.0
+    STD: 0.1
+
+MODEL:
+  NAME: 'StandardSegmentation'
+  GENERATOR:
+    NAME: 'SegResNet_monai'
+    DIMENSIONS: 3
+    INITIAL_FILTERS: 32
+    OUTPUT_CHANNELS: 16
+    NORM:
+      - 'INSTANCE'
+      - { affine: true }
+    BLOCKS_DOWN: (1, 2, 2, 4, 4)
+    BLOCKS_UP: (1, 1, 1, 1)
+    UPSAMPLE_MODE: 'deconv'
+
+CRITERION:
+  PIXEL_WISE_LOSS_TYPE: 'DiceCELoss'
+
+TRAIN:
+  BATCHSIZE_PER_GPU: 1
+  TOTAL_ITERATION: 25e4
+  PRINT_FREQUENCY: 1.0
+  DISPLAY_FREQUENCY: 250
+  CHECKPOINT: ''
+  OPTIMIZER: adam # sgd or adam
+
+  # initial learning rate
+  GENERATOR:
+    LR: 0.0003 # 0.01 if sgd, 0.0003 if adam
+
+  # for sgd
+  MOMENTUM: 0.99
+  NESTEROV: true
+  WEIGHT_DECAY: 3e-5
+
+  # for adam
+  GAMMA1: 0.9
+  GAMMA2: 0.999
+
+  # learning rate policy
+  LR_POLICY: 'poly' # 'poly' or 'MultiStepLR'
+
+  # for poly learning rate policy
+  POLY_LR_POLICY_EXPONENT: 0.9
+
+  # for multi-step learning rate policy
+  LR_FACTOR: 0.1
+  LR_STEP:
+    - 100000
+    - 200000
+
+VAL:
+  BATCHSIZE_PER_GPU: 1
+  EVALUATION_FREQUENCY: 2500
+  PRINT_FREQUENCY: 1.0
+  SHUFFLE: false
+  MODEL_FILE: ''
+  SLIDING_WINDOW_BATCH_SIZE: 1
+  OVERLAP_RATIO: 0.625
+
+TEST:
+  BATCHSIZE_PER_GPU: 1
+  IS_VISUALIZATION: True
+  SHUFFLE: false
+  MODEL_FILE: ''
+  SAVE_PREDICTION: false

@@ -6,109 +6,121 @@
 # FILE: train_engine.py
 
 # sys
-import time
 import logging
 import os
+import pickle as pkl
+import SimpleITK as sitk
+import numpy as np
 
 # torch
 import torch
 
-# project
-from lib.utils.utils import AverageMeter
+# monai
+from monai.data import decollate_batch
+from monai.inferers import sliding_window_inference
+from monai.transforms import KeepLargestConnectedComponent
 
-logger = logging.getLogger(__name__)
+# project
+from lib.utils.analyze import dataset_performance_analysis, result_visualization_and_excel_generation, \
+    organ_result_generation
+
+
+def save(data, meta_info, output_folder, organ_name):
+    data = (data.squeeze().detach().cpu().numpy() > 0).astype(np.int16)
+    image = sitk.GetImageFromArray(data)
+    image.SetSpacing(meta_info['spacing'])
+    image.SetDirection(meta_info['direction'])
+    image.SetOrigin(meta_info['origin'])
+    if not os.path.exists(output_folder):
+        os.makedirs(output_folder)
+    sitk.WriteImage(image, os.path.join(output_folder, f'{organ_name}.nii.gz'))
 
 
 def do_test(test_loader,
             model,
             cfg,
             visualize,
-            writer_dict,
             final_output_dir):
     model.eval()
 
-    batch_time = AverageMeter()
-    data_time = AverageMeter()
-    losses = AverageMeter()
-    SSIM = AverageMeter()
-    RMSE = AverageMeter()
-    end = time.time()
-
-    writer = writer_dict['writer']
-
-    is_volume_visualizer = cfg.TEST.IS_VOLUME_VISUALIZER
-    if is_volume_visualizer:
-        from lib.analyze.utilis import VolumeVisualization
-        from lib.analyze.utilis import visualize as volume_visualizer_function
-        volume_visualizer = VolumeVisualization(data_range=[cfg.DATASET.NORMALIZATION.AFTER_MIN,
-                                                            cfg.DATASET.NORMALIZATION.AFTER_MAX],
-                                                before_min=cfg.DATASET.NORMALIZATION.BEFORE_MIN,
-                                                before_max=cfg.DATASET.NORMALIZATION.BEFORE_MAX,
-                                                after_min=cfg.DATASET.NORMALIZATION.AFTER_MIN,
-                                                after_max=cfg.DATASET.NORMALIZATION.AFTER_MAX,
-                                                threshold=200
-                                                )
-
+    all_result = {}
     for i, current_data in enumerate(test_loader):
-        data_time.update(time.time() - end)
+        patient_result = {}
 
-        model.set_dataset(current_data)
+        current_patient_path = current_data['path'][0]
+
+        # generate the input CT image
+        current_image = current_data['data']['image']
+        current_image = current_image.to('cuda' if torch.cuda.is_available() else 'cpu')
+
+        # generate the auto-segmentation result
         with torch.no_grad():
-            model.forward()
-            #model.output = model.output[0]
-            model.target = model.target[0]
+            current_auto_segmentation_result = sliding_window_inference(inputs=current_image,
+                                                                        roi_size=cfg.DATASET.TARGET_SIZE,
+                                                                        sw_batch_size=1,
+                                                                        predictor=model.generator,
+                                                                        mode='gaussian',
+                                                                        overlap=cfg.VAL.OVERLAP_RATIO,
+                                                                        sw_device='cuda' if torch.cuda.is_available() else 'cpu',
+                                                                        device='cpu')
+            current_auto_segmentation_result = current_auto_segmentation_result.detach()
 
-        current_loss = model.criterion_pixel_wise_loss(model.output, model.target)
-        losses.update(current_loss.item())
+        # generate the GT labels
+        if cfg.DATASET.NAME == 'HN_end2end':
+            GT_labels = {k: v for k, v in current_data['data'].items() if
+                         k in ['MASK_P1', 'MASK_P2', 'MASK_P3', 'MASK_P4']}
+        else:
+            GT_labels = {k: v for k, v in current_data['data'].items() if k in ['label']}
 
-        if is_volume_visualizer:
-            current_rmse, current_ssim = volume_visualizer.update(current_data, model)
-            RMSE.update(current_rmse)
-            SSIM.update(current_ssim)
+        current_data = decollate_batch(current_data)[0]
+        for k, current_GT_label in GT_labels.items():
+            current_unique_ids = torch.unique(current_GT_label)[1:]
 
-        batch_time.update(time.time() - end)
-        end = time.time()
+            for current_organ_id in current_unique_ids:
+                current_organ_id = current_organ_id.long().item()
+                current_organ_name = model.organ_map[current_organ_id]
+                model.logger.info(current_patient_path + '\t' + current_organ_name)
+                current_organ_label = (current_GT_label == current_organ_id).float()
 
-        if i % cfg.VAL.PRINT_FREQUENCY == 0:
-            msg = 'Test: [{0}/{1}]\t' \
-                  'Loss {losses.val:.5f} ({losses.avg:.5f})\t' \
-                  'RMSE {RMSE.val:.5f}({RMSE.avg:.5f})\t' \
-                  'SSIM {SSIM.val:.5f}({SSIM.avg:.5f})'.format(
-                i, len(test_loader),
-                losses=losses,
-                RMSE=RMSE,
-                SSIM=SSIM)
+                current_auto_segmentation_mask = current_auto_segmentation_result[:, current_organ_id].unsqueeze(1)
 
-            logger.info(msg)
+                # calculate the metric
+                patient_result[current_organ_name] = organ_result_generation(
+                    reference_mask=current_organ_label.squeeze().detach().cpu().numpy(),
+                    predict_mask=current_auto_segmentation_mask[0].squeeze().detach().cpu().numpy() > 0,
+                    spacing=current_data['meta_info']['spacing'])
 
-        model.output = [model.output]
-        model.target = [model.target]
-        visualize(model, writer_dict['test_global_steps'],
-                  os.path.join(final_output_dir, "test"),
-                  1,
-                  cfg.DATASET.NORMALIZATION.BEFORE_MIN,
-                  cfg.DATASET.NORMALIZATION.BEFORE_MAX,
-                  cfg.DATASET.NORMALIZATION.AFTER_MIN,
-                  cfg.DATASET.NORMALIZATION.AFTER_MAX)
-        writer.add_scalar('test_loss', losses.val, writer_dict['test_global_steps'])
-        writer.add_scalar('RMSE', RMSE.val, writer_dict['test_global_steps'])
-        writer.add_scalar('SSIM', SSIM.val, writer_dict['test_global_steps'])
-        writer_dict['test_global_steps'] += 1
+                # visualization
+                if cfg.TEST.IS_VISUALIZATION:
+                    dataset = cfg.DATASET.NAME
+                    patient_ID = os.path.basename(current_patient_path)
+                    model.visualization_info = {'dataset': dataset,
+                                                'patient_ID': patient_ID,
+                                                'organ_name': current_organ_name,
+                                                'input': current_image,
+                                                'label': current_organ_label,
+                                                'prediction': current_auto_segmentation_mask}
+                    visualize(model, i, os.path.join(final_output_dir, "test"), 1)
 
-    # log the slice-wise ssim and rmse
-    for current_data_path, current_rmse, current_ssim in zip(volume_visualizer.data_path,
-                                                             volume_visualizer.rmse,
-                                                             volume_visualizer.ssim):
-        logger.info('{}\tSSIM:{}\tRMSE:{}'.format(os.path.basename(current_data_path), current_rmse, current_ssim))
-    logger.info('* 2D Test: \t Average RMSE {}\t SSIM {}\n'.format(RMSE.avg, SSIM.avg))
+                # save the prediction results
+                if cfg.TEST.SAVE_PREDICTION:
+                    save(current_auto_segmentation_mask,
+                         current_data['meta_info'],
+                         output_folder=os.path.join(final_output_dir, 'test', 'predictions', 'auto',
+                                                    current_patient_path),
+                         organ_name=current_organ_name)
 
-    if is_volume_visualizer:
-        rmse, ssim = volume_visualizer_function(volume_visualizer,
-                                                model,
-                                                writer_dict['test_global_steps'],
-                                                os.path.join(final_output_dir, "volume"),
-                                                1)
-        msg = '* 3D Test: \t RMSE {}\t SSIM {}'.format(rmse, ssim)
-        logger.info(msg)
+        all_result[current_patient_path] = patient_result
 
-    return losses.val
+    model.logger.info('Saving the result ...')
+    if not os.path.exists(os.path.join(final_output_dir, 'test', 'performance')):
+        os.makedirs(os.path.join(final_output_dir, 'test', 'performance'))
+    with open(os.path.join(final_output_dir, 'test', 'performance', 'metric_result.pkl'), 'wb') as f:
+        pkl.dump(all_result, f)
+
+    model.logger.info('Analyzing the result ...')
+    dataset_performance_result = dataset_performance_analysis(result=all_result)
+    result_visualization_and_excel_generation(result=dataset_performance_result,
+                                              output_folder=os.path.join(final_output_dir, 'test',
+                                                                         'performance'),
+                                              prefix='auto')

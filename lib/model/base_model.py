@@ -16,15 +16,14 @@ import torch.nn as nn
 from lib.model.utils.utils import get_scheduler
 from lib.utils.utils import AverageMeter
 
-logger = logging.getLogger(__name__)
-
 
 class BaseModel(nn.Module):
-    def __init__(self, is_train=True):
+    def __init__(self, logger, is_train=True):
         super(BaseModel, self).__init__()
         self.is_train = is_train
         self.losses_train = AverageMeter()
         self.losses_val = AverageMeter()
+        self.logger = logger
 
     def _create_optimize_engine(self, optimizer_option, criterion_option, scheduler_option):
         self.optimizers = []
@@ -68,16 +67,23 @@ class BaseModel(nn.Module):
                     self.criterion_pixel_wise_loss = torch.nn.L1Loss()
                 elif criterion_option.pixel_wise_loss_type == 'ClassSpatialMaskedDiceLoss':
                     from lib.model.loss.ClassSpatialMaskedLoss import ClassSpatialMaskedDiceLoss
-                    self.criterion_pixel_wise_loss = ClassSpatialMaskedDiceLoss(include_background=False, sigmoid=False, to_onehot_y=False)
+                    self.criterion_pixel_wise_loss = ClassSpatialMaskedDiceLoss(include_background=False, sigmoid=False,
+                                                                                to_onehot_y=False)
+                elif criterion_option.pixel_wise_loss_type == 'ClassSpatialMaskedDiceLossCustomized':
+                    from lib.model.loss.ClassSpatialMaskedLossCustomized import ClassSpatialMaskedDiceLoss
+                    self.criterion_pixel_wise_loss = ClassSpatialMaskedDiceLoss(include_background=False, sigmoid=False,
+                                                                                to_onehot_y=False, reduction='none')
                 elif criterion_option.pixel_wise_loss_type == 'DiceLoss':
                     from monai.losses import DiceLoss
                     self.criterion_pixel_wise_loss = DiceLoss(include_background=False, softmax=True, to_onehot_y=True)
                 elif criterion_option.pixel_wise_loss_type == 'DiceCELoss':
                     from monai.losses import DiceCELoss
-                    self.criterion_pixel_wise_loss = DiceCELoss(include_background=False, to_onehot_y=True, softmax=True)
+                    self.criterion_pixel_wise_loss = DiceCELoss(include_background=False, to_onehot_y=False,
+                                                                softmax=True)
                 elif criterion_option.pixel_wise_loss_type == 'DiceFocalLoss':
                     from monai.losses import DiceFocalLoss
-                    self.criterion_pixel_wise_loss = DiceFocalLoss(include_background=False, to_onehot_y=True, softmax=True)
+                    self.criterion_pixel_wise_loss = DiceFocalLoss(include_background=False, to_onehot_y=True,
+                                                                   softmax=True)
                 else:
                     raise "Loss type {} is not implemented yet!".format(criterion_option.pixle_wise_loss_type)
 
@@ -105,34 +111,34 @@ class BaseModel(nn.Module):
         if options is not None:
             if 'generator' in options:
                 self.generator.load_state_dict(options['generator'])
-                logger.info('Finish generator loading!')
+                self.logger.info('Finish generator loading!')
             else:
-                logger.info('Cannot find pretrained generator! Train from scratch!')
+                self.logger.info('Cannot find pretrained generator! Train from scratch!')
 
             if 'optimizer_generator' in options:
                 self.optimizer_generator.load_state_dict(options['optimizer_generator'])
-                logger.info('Finish optimizer_generator loading!')
+                self.logger.info('Finish optimizer_generator loading!')
             else:
-                logger.info('Cannot find the state of the optimizer_generator! Record from beginning!')
+                self.logger.info('Cannot find the state of the optimizer_generator! Record from beginning!')
 
             if 'discriminator' in options:
                 self.generator.load_state_dict(options['discriminator'])
-                logger.info('Finish discriminator loading!')
+                self.logger.info('Finish discriminator loading!')
             else:
-                logger.info('Cannot find pretrained discriminator! Train from scratch!')
+                self.logger.info('Cannot find pretrained discriminator! Train from scratch!')
 
             if 'optimizer_discriminator' in options:
                 self.optimizer_generator.load_state_dict(options['optimizer_discriminator'])
-                logger.info('Finish optimizer_discriminator loading!')
+                self.logger.info('Finish optimizer_discriminator loading!')
             else:
-                logger.info('Cannot find the state of the optimizer_discriminator! Record from beginning!')
+                self.logger.info('Cannot find the state of the optimizer_discriminator! Record from beginning!')
 
             if 'last_iteration' in options:
                 self.last_iteration = options['last_iteration']
-                logger.info('Train from iteration {} ...'.format(self.last_iteration))
+                self.logger.info('Train from iteration {} ...'.format(self.last_iteration))
                 self.scheduler_option['last_iteration'] = self.last_iteration
             else:
-                logger.info('Cannot find last iteration index! Train from iteration 0!')
+                self.logger.info('Cannot find last iteration index! Train from iteration 0!')
 
         if self.is_train:
             self.schedulers = [get_scheduler(current_optimizer, self.scheduler_option)
@@ -140,16 +146,17 @@ class BaseModel(nn.Module):
 
     def print_network(self):
         if hasattr(self, 'generator'):
-            logger.info("=== generator ===")
-            logger.info(self.generator)
+            self.logger.info("=== generator ===")
+            self.logger.info(self.generator)
 
         if hasattr(self, 'discriminator'):
-            logger.info("=== discriminator ===")
-            logger.info(self.discriminator)
+            self.logger.info("=== discriminator ===")
+            self.logger.info(self.discriminator)
 
     def set_dataset(self, input):
         self.input = input['input']
         self.target = input['target']
+        self.data_path = input['path']
         if torch.cuda.is_available():
             self.input = self.input.cuda()
             self.target = self.target.cuda()
@@ -202,6 +209,5 @@ class BaseModel(nn.Module):
                     losses=self.losses_val)
         else:
             raise ValueError('Unknown operation in information recording!')
-        logger.info(msg)
+        self.logger.info(msg)
         return self.losses_val.avg
-

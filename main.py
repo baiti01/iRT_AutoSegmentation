@@ -4,35 +4,36 @@
 # datetime:2019/7/2 15:58
 
 # sys
-import os
-os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 import argparse
 import importlib
+import os
 import shutil
 
 # torch
 import torch
 import torch.backends.cudnn as cudnn
-from torch.utils.tensorboard import SummaryWriter
 
 # monai
 from monai.config import print_config
+from torch.utils.tensorboard import SummaryWriter
 
 # project
 from lib.config import cfg, update_config
-from lib.utils.utils import create_logger
+from lib.engine.test_engine import do_test
 from lib.engine.train_engine import do_train
 from lib.engine.validate_engine import do_validate
+from lib.utils.utils import create_logger, save_checkpoint
 import lib.dataset as dataset
 import lib.model as model
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Deep Dose Plugin")
-    parser.add_argument('--cfg', default=r'experiments\IPA.yaml', type=str)
-    parser.add_argument('output_dir', default=None, type=str, nargs='?')
-    parser.add_argument('log_dir', default=None, type=str, nargs='?')
-    parser.add_argument('data_root', default=None, type=str, nargs='?')
+    parser = argparse.ArgumentParser(description="Image to image translation")
+    parser.add_argument('--cfg', default=r'experiments/StandardSegmentation.yaml', type=str)
+    parser.add_argument('--output_dir', default=None, type=str, nargs='?')
+    parser.add_argument('--data_root', default=None, type=str, nargs='?')
+    parser.add_argument('--workers', default=0, type=int, nargs='?')
+    parser.add_argument('--checkpoint', default=None, type=str)
     parser.add_argument('opts',
                         help="Modify config options using the command-line",
                         default=None,
@@ -57,16 +58,24 @@ def main():
 
     # move key files into the folder to ensure the reproducibility
     shutil.copy(args.cfg, os.path.join(key_files_dir, os.path.basename(args.cfg)))
-    shutil.copytree('./lib', os.path.join(key_files_dir, 'lib'))
-    shutil.copy('train.py', os.path.join(key_files_dir, 'train.py'))
+    shutil.copy('main.py', os.path.join(key_files_dir, 'main.py'))
+    shutil.copytree('./lib', os.path.join(key_files_dir, 'lib'),
+                    ignore=shutil.ignore_patterns('*.pyc', 'tmp*', '*__pycache__*', '*bin', '*npy'))
 
     # data
-    train_loader = eval('dataset.' + cfg.DATASET.NAME + '.get_data_provider')(cfg, phase='train')
-    val_loader = eval('dataset.' + cfg.DATASET.NAME + '.get_data_provider')(cfg, phase='val')
+    train_loader, organ_map = eval('dataset.' + cfg.DATASET.NAME + '.get_data_provider')(cfg,
+                                                                                         output_folder=final_output_dir,
+                                                                                         phase='train')
+    val_loader, _ = eval('dataset.' + cfg.DATASET.NAME + '.get_data_provider')(cfg,
+                                                                               output_folder=final_output_dir,
+                                                                               phase='val')
 
     # model
-    model = eval('model.' + cfg.MODEL.NAME + '.get_model')(cfg, is_train=True)
+    model = eval('model.' + cfg.MODEL.NAME + '.get_model')(cfg, logger=logger, is_train=True)
     model.setup(cfg)
+
+    # load organ map and data weight
+    model.organ_map = organ_map
 
     # visualize function
     visualize_function = None
@@ -74,8 +83,9 @@ def main():
         try:
             visualize_module = importlib.import_module(r'lib.analyze.visualize_{}'.format(cfg.MODEL.NAME))
         except:
-            logger.info('Cannot find visualize function: visualize_{}! Using the default function!'.format(cfg.MODEL.NAME))
-            visualize_module = importlib.import_module(r'lib.analyze.visualize_Default')
+            logger.info('Cannot find visualize function: visualize_{}! Using the default segmentation function!'.format(
+                cfg.MODEL.NAME))
+            visualize_module = importlib.import_module(r'lib.analyze.visualize_Default_Segmentation')
 
         visualize_function = getattr(visualize_module, 'visualize')
 
@@ -105,7 +115,7 @@ def main():
         indicator_dict['current_iteration'] = checkpoint['indicator_dict']['current_iteration']
 
         setup_dict = {'last_iteration': indicator_dict['current_iteration']}
-        state_keys = ['generator', 'optimizer_generator', 'discriminator', 'optimizer_discriminator']
+        state_keys = ['generator', 'optimizer_generator']
         for current_key in state_keys:
             if current_key in checkpoint:
                 setup_dict[current_key] = checkpoint[current_key]
@@ -131,7 +141,28 @@ def main():
                  tb_log_dir,
                  visualize_function)
 
-    do_validate(val_loader, model, cfg, visualize_function, writer_dict, final_output_dir)
+        do_validate(val_loader, model, cfg, visualize_function, writer_dict, final_output_dir)
+
+    if True:
+        output_dictionary = {'indicator_dict': indicator_dict,
+                             'writer_dict_train_global_steps': writer_dict['train_global_steps'],
+                             'writer_dict_val_global_steps': writer_dict['val_global_steps'],
+                             'tb_log_dir': tb_log_dir}
+
+        if hasattr(model, 'generator'):
+            output_dictionary['generator'] = model.generator.state_dict()
+        else:
+            raise ModuleNotFoundError("Not find the generator!")
+
+        save_checkpoint(output_dictionary, indicator_dict, final_output_dir, filename='model_final.pth.tar')
+
+    if True:
+        for current_testing_dataset in cfg.DATASET.TEST_KEY:
+            test_loader, _ = eval('dataset.' + cfg.DATASET.NAME + '.get_data_provider')(cfg,
+                                                                                        output_folder=final_output_dir,
+                                                                                        phase='test',
+                                                                                        data_key=current_testing_dataset)
+            do_test(test_loader, model, cfg, visualize_function, final_output_dir)
     writer_dict['writer'].close()
 
 

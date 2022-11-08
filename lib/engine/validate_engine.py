@@ -5,12 +5,13 @@
 # DATETIME: 8/12/2019 3:43 PM
 
 # sys
-import time
 import os
 import random
+import time
 
-# torch
+# torch and monai
 import torch
+from monai.inferers import sliding_window_inference
 
 # project
 from lib.utils.utils import AverageMeter
@@ -28,12 +29,24 @@ def do_validate(val_loader,
 
     selected_visualized_data = random.randint(0, len(val_loader) - 1)
     for i, current_data in enumerate(val_loader):
-        model.set_dataset(current_data)
+        is_success = model.set_dataset(current_data)
+        if is_success == -1:
+            continue
+        del current_data
+
         model.input.require_grad = False
 
         with torch.no_grad():
-            model.forward()
-            model.loss_calculation()
+            with torch.cuda.amp.autocast(enabled=model.amp):
+                model.output = sliding_window_inference(model.input,
+                                                        roi_size=cfg.DATASET.TARGET_SIZE,
+                                                        sw_batch_size=cfg.VAL.SLIDING_WINDOW_BATCH_SIZE,
+                                                        predictor=model.generator,
+                                                        mode='gaussian',
+                                                        overlap=cfg.VAL.OVERLAP_RATIO,
+                                                        device='cpu')
+                del model.input
+                model.loss = model.criterion_pixel_wise_loss(model.output.cpu(), model.target.cpu())
 
         batch_time.update(time.time() - end)
         end = time.time()
@@ -42,6 +55,7 @@ def do_validate(val_loader,
                                                data_loader_size=len(val_loader),
                                                writer_dict=writer_dict,
                                                phase='val')
+
         if i == selected_visualized_data and cfg.IS_VISUALIZE and False:
             visualize(model,
                       writer_dict['val_global_steps'],

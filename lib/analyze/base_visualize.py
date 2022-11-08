@@ -17,12 +17,13 @@ from lib.analyze import html
 
 
 class VisualizationAnalysis(object):
-    def __init__(self, model, iteration, output_dir):
+    def __init__(self, model, iteration, output_dir, table_columns=1):
         self.model = model
         self.iteration = iteration
         self.output_dir = output_dir
         self.webpage = html.HTML(os.path.join(output_dir, 'web'),
                                  'Experiment name = {}'.format(os.path.basename(output_dir)),
+                                 table_columns=table_columns,
                                  refresh=60)
 
     @staticmethod
@@ -45,10 +46,12 @@ class VisualizationAnalysis(object):
             self.save_single_image(image_numpy[:, :, int(d / 2)], saved_image_path, min_v, max_v, cmap)
 
             saved_image_path = image_path + '_s.png'
-            self.save_single_image(image_numpy[:, int(w / 2), :].transpose((1, 0)), saved_image_path, min_v, max_v, cmap)
+            self.save_single_image(image_numpy[:, int(w / 2), :].transpose((1, 0)), saved_image_path, min_v, max_v,
+                                   cmap)
 
             saved_image_path = image_path + '_c.png'
-            self.save_single_image(image_numpy[int(h / 2), :, :].transpose((1, 0)), saved_image_path, min_v, max_v, cmap)
+            self.save_single_image(image_numpy[int(h / 2), :, :].transpose((1, 0)), saved_image_path, min_v, max_v,
+                                   cmap)
 
     def tensor2image(self, input_image, scale=1, shift=0, batch_index=0, channel_index=0):
         if not isinstance(input_image, np.ndarray):
