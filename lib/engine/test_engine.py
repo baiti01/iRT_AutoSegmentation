@@ -55,15 +55,17 @@ def do_test(test_loader,
 
         # generate the auto-segmentation result
         with torch.no_grad():
-            current_auto_segmentation_result = sliding_window_inference(inputs=current_image,
-                                                                        roi_size=cfg.DATASET.TARGET_SIZE,
-                                                                        sw_batch_size=1,
-                                                                        predictor=model.generator,
-                                                                        mode='gaussian',
-                                                                        overlap=cfg.VAL.OVERLAP_RATIO,
-                                                                        sw_device='cuda' if torch.cuda.is_available() else 'cpu',
-                                                                        device='cpu')
+            with torch.cuda.amp.autocast(enabled=model.amp):
+                current_auto_segmentation_result = sliding_window_inference(inputs=current_image,
+                                                                            roi_size=cfg.DATASET.TARGET_SIZE,
+                                                                            sw_batch_size=1,
+                                                                            predictor=model.generator,
+                                                                            mode='gaussian',
+                                                                            overlap=cfg.VAL.OVERLAP_RATIO,
+                                                                            sw_device='cuda' if torch.cuda.is_available() else 'cpu',
+                                                                            device='cpu')
             current_auto_segmentation_result = current_auto_segmentation_result.detach()
+            current_auto_segmentation_result = model.asdiscrete(current_auto_segmentation_result[0, ...])[None, ...]
 
         # generate the GT labels
         if cfg.DATASET.NAME == 'HN_end2end':
@@ -87,7 +89,7 @@ def do_test(test_loader,
                 # calculate the metric
                 patient_result[current_organ_name] = organ_result_generation(
                     reference_mask=current_organ_label.squeeze().detach().cpu().numpy(),
-                    predict_mask=current_auto_segmentation_mask[0].squeeze().detach().cpu().numpy() > 0,
+                    predict_mask=current_auto_segmentation_mask[0].squeeze().detach().cpu().numpy(),
                     spacing=current_data['meta_info']['spacing'])
 
                 # visualization

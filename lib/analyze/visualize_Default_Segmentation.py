@@ -51,27 +51,27 @@ def visualize(model,
     visualizer = VisualizationAnalysis(model, iteration, output_dir, table_columns=table_columns)
     webpage = visualizer.webpage
 
-    before_min = 0
-    before_max = 2000
+    before_min = model.cfg.DATASET.INTENSITY_MIN
+    before_max = model.cfg.DATASET.INTENSITY_MAX 
     after_min = 0
     after_max = 1
-    min_v, max_v = 1000 - 160, 1000 + 240
+    min_v, max_v = -160, 240
     threshold = 0
 
     scale = (before_max - before_min) / (after_max - after_min)
     shift = before_min - after_min * scale
 
     # setup the input
-    input = visualizer.tensor2image(model.visualization_info['input'], scale, shift)
+    input = visualizer.tensor2image(model.visualization_info['input'], scale, shift)[:, ::-1, :]
 
     organ_name = model.visualization_info['organ_name']
     # we assume the target has size of B*C*D*H*W,
     # where C denotes the number of classes, including the background (id = 0)
     b, c, _, _, _ = model.visualization_info['label'].shape
 
-    target = model.visualization_info['label'].squeeze().detach().cpu().numpy()
+    target = model.visualization_info['label'].squeeze().detach().cpu().numpy()[:, ::-1, :]
 
-    prediction_output_activation = model.visualization_info['prediction'].squeeze().detach().cpu().numpy()
+    prediction_output_activation = model.visualization_info['prediction'].squeeze().detach().cpu().numpy()[:, ::-1, :]
     prediction_output = prediction_output_activation > threshold
 
     output_folder = os.path.join(output_dir, 'web', 'images', organ_name)
