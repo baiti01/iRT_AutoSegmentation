@@ -46,7 +46,13 @@ def do_validate(val_loader,
                                                         overlap=cfg.VAL.OVERLAP_RATIO,
                                                         device='cpu')
                 del model.input
+
+                class_spatial_mask = torch.zeros_like(model.target)
+                class_spatial_mask[:, model.unique_idx] = 1
                 model.loss = model.criterion_pixel_wise_loss(model.output.cpu(), model.target.cpu())
+                model.loss = torch.mean(model.loss) * (model.target.shape[1] - 1) / (len(model.unique_idx) - 1)
+
+                del class_spatial_mask
 
         batch_time.update(time.time() - end)
         end = time.time()

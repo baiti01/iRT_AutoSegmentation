@@ -11,7 +11,7 @@ CUDNN:
 
 DATASET:
   NAME: 'AMOS22'
-  ROOT: './data'
+  ROOT: 'D:\data\1_Challenge\AMOS22\AMOS22\amos22'
   JSON_FILE: 'CT.json'
   TRAIN_KEY: 'training'
   TEST_KEY:
@@ -23,8 +23,8 @@ DATASET:
   NUM_CLASSES: 16
   TARGET_SIZE:
     - 64
-    - 320
-    - 320
+    - 160
+    - 160
 
   # data normalization
   INTENSITY_MIN: -676.25
@@ -79,7 +79,10 @@ MODEL:
     UPSAMPLE_MODE: 'deconv'
 
 CRITERION:
-  PIXEL_WISE_LOSS_TYPE: 'DiceCELoss'
+  PIXEL_WISE_LOSS_TYPE: 'ClassSpatialMaskedDiceLossCustomized'
+  IS_CE: false # if you want to use combined CE loss, you should modify the code a little bit since my customized Dice loss uses sigmoid as the activation function instead of softmax.
+  DICE_WEIGHT: 1.0
+  CE_WEIGHT: 1.0
 
 TRAIN:
   BATCHSIZE_PER_GPU: 1

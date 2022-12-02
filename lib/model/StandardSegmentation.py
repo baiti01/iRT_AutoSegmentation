@@ -7,6 +7,7 @@
 
 # sys
 from easydict import EasyDict as edict
+import numpy as np
 
 # monai
 from monai.metrics import compute_meandice
@@ -36,11 +37,19 @@ class StandardSegmentation(BaseModel):
 
         self.generator = define_generator(cfg.MODEL.GENERATOR)
         self._create_optimize_engine(optimizer_option, criterion_option, scheduler_option)
-        self.asdiscrete = AsDiscrete(argmax=True, to_onehot=cfg.DATASET.NUM_CLASSES)
         self.cfg = cfg
         self.amp = cfg.AUTOMATIC_MIXED_PRECISION
         if self.amp:
             self.scaler = GradScaler()
+
+        self.is_ce = cfg.CRITERION.IS_CE
+        if self.is_ce:
+            self.dice_weight = cfg.CRITERION.DICE_WEIGHT
+            self.ce_weight = cfg.CRITERION.CE_WEIGHT
+            self.ce = torch.nn.CrossEntropyLoss(weight=None, reduction='mean')
+            self.asdiscrete = AsDiscrete(argmax=True, to_onehot=cfg.DATASET.NUM_CLASSES)
+        else:
+            self.asdiscrete = AsDiscrete(threshold=0.0)
 
     def set_dataset(self, input):
         if hasattr(self, 'target'):
@@ -76,11 +85,20 @@ class StandardSegmentation(BaseModel):
         del self.input
 
     def loss_calculation(self):
+        class_spatial_mask = torch.zeros_like(self.target)
+        class_spatial_mask[:, self.unique_idx] = 1
+
         if self.amp:
             with autocast():
-                self.loss = self.criterion_pixel_wise_loss(self.output, self.target)
+                self.loss = self.criterion_pixel_wise_loss(self.output, self.target, class_spatial_mask, reduce_axis=[-3, -2, -1])
+                self.loss = torch.mean(self.loss) * (self.target.shape[1] - 1) / (len(self.unique_idx) - 1)
+                if self.is_ce:
+                    self.loss += self.ce(self.output, torch.argmax(self.target, dim=1))
         else:
-            self.loss = self.criterion_pixel_wise_loss(self.output, self.target)
+            self.loss = self.criterion_pixel_wise_loss(self.output, self.target, class_spatial_mask, reduce_axis=[-3, -2, -1])
+            self.loss = torch.mean(self.loss) * (self.target.shape[1] - 1) / (len(self.unique_idx) - 1)
+            if self.is_ce:
+                self.loss += self.ce(self.output, torch.argmax(self.target, dim=1))
         return 0
 
     def optimize_parameters(self):
@@ -133,7 +151,7 @@ class StandardSegmentation(BaseModel):
             self.losses_val.update(self.loss.item())
 
             self.output = self.asdiscrete(self.output[0, ...])[None, ...]
-            current_DSC = compute_meandice(self.output, self.target, include_background=False)
+            current_DSC = compute_meandice(self.output, self.target.to(self.output.device), include_background=False)
             self.DSC.update(current_DSC.detach().cpu().numpy())
 
             del current_DSC
@@ -148,9 +166,11 @@ class StandardSegmentation(BaseModel):
             if current_iteration % self.cfg.VAL.PRINT_FREQUENCY == 0:
                 msg = 'Val: [{0}/{1}]\t' \
                       'Loss {losses.val:.5f} ({losses.avg:.5f})\t' \
+                      'Avg DSC {avg_DSC:.3f}\t' \
                       'DSC {DSC_val} ({DSC_avg})'.format(
                     current_iteration, data_loader_size,
                     losses=self.losses_val,
+                    avg_DSC=np.nanmean(self.DSC.avg) * 100,
                     DSC_val=[float('{:.3f}'.format(x * 100)) for x in list(self.DSC.val[0])],
                     DSC_avg=[float('{:.3f}'.format(x * 100)) for x in list(self.DSC.avg)]
                 )

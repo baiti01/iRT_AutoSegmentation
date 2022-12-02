@@ -29,7 +29,7 @@ import lib.model as model
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Image to image translation")
-    parser.add_argument('--cfg', default=r'experiments/StandardSegmentation.yaml', type=str)
+    parser.add_argument('--cfg', default=r'experiments/prostate.yaml', type=str)
     parser.add_argument('--output_dir', default=None, type=str, nargs='?')
     parser.add_argument('--data_root', default=None, type=str, nargs='?')
     parser.add_argument('--workers', default=0, type=int, nargs='?')

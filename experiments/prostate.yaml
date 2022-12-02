@@ -10,26 +10,26 @@ CUDNN:
   ENABLED: true
 
 DATASET:
-  NAME: 'AMOS22'
-  ROOT: './data'
-  JSON_FILE: 'CT.json'
+  NAME: 'UTSW_Prostate'
+  ROOT: 'D:\data\0_curated_data\segmentation\3_Pelvis\MalePelvis'
+  JSON_FILE: 'UTSW_Prostate.json'
   TRAIN_KEY: 'training'
   TEST_KEY:
-    - 'validation'
+    - 'testing'
   CROSS_VALIDATION_FOLDERS: 5
   CROSS_VALIDATION_CURRENT_FOLDER: 0
   CROSS_VALIDATION_RANDOM_SEED: 37
 
-  NUM_CLASSES: 16
+  NUM_CLASSES: 7
   TARGET_SIZE:
     - 64
-    - 320
-    - 320
+    - 160
+    - 160
 
   # data normalization
-  INTENSITY_MIN: -676.25
-  INTENSITY_MAX: 200.595
-  INTENSITY_CLIP: true
+  INTENSITY_MIN: -1000
+  INTENSITY_MAX: 1000
+  INTENSITY_CLIP: false
 
   # data augmentation
   RAND_AFFINE:
@@ -70,7 +70,7 @@ MODEL:
     NAME: 'SegResNet_monai'
     DIMENSIONS: 3
     INITIAL_FILTERS: 32
-    OUTPUT_CHANNELS: 16
+    OUTPUT_CHANNELS: 7
     NORM:
       - 'INSTANCE'
       - { affine: true }
@@ -79,7 +79,10 @@ MODEL:
     UPSAMPLE_MODE: 'deconv'
 
 CRITERION:
-  PIXEL_WISE_LOSS_TYPE: 'DiceCELoss'
+  PIXEL_WISE_LOSS_TYPE: 'ClassSpatialMaskedDiceLossCustomized'
+  IS_CE: false # if you want to use combined CE loss, you should modify the code a little bit since my customized Dice loss uses sigmoid as the activation function instead of softmax.
+  DICE_WEIGHT: 1.0
+  CE_WEIGHT: 1.0
 
 TRAIN:
   BATCHSIZE_PER_GPU: 1
@@ -87,11 +90,11 @@ TRAIN:
   PRINT_FREQUENCY: 1.0
   DISPLAY_FREQUENCY: 250
   CHECKPOINT: ''
-  OPTIMIZER: sgd # sgd or adam
+  OPTIMIZER: adam # sgd or adam
 
   # initial learning rate
   GENERATOR:
-    LR: 0.01 # 0.01 if sgd, 0.0003 if adam
+    LR: 0.0003 # 0.01 if sgd, 0.0003 if adam
 
   # for sgd
   MOMENTUM: 0.99
