@@ -53,6 +53,9 @@ def main():
 
     # logger
     logger, final_output_dir, tb_log_dir, key_files_dir = create_logger(cfg, args.cfg)
+    # get pid
+    logger.info('=> Current PID: {}'.format(os.getpid()))
+    
     logger.info(cfg)
     print_config()
 
