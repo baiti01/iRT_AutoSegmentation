@@ -10,26 +10,26 @@ CUDNN:
   ENABLED: true
 
 DATASET:
-  NAME: 'AMOS22'
-  ROOT: 'D:\data\1_Challenge\AMOS22\AMOS22\amos22'
-  JSON_FILE: 'CT.json'
+  NAME: 'UTSW_Prostate'
+  ROOT: 'D:\data\0_curated_data\segmentation\3_Pelvis\MalePelvis'
+  JSON_FILE: 'UTSW_Prostate.json'
   TRAIN_KEY: 'training'
   TEST_KEY:
-    - 'validation'
+    - 'testing'
   CROSS_VALIDATION_FOLDERS: 5
   CROSS_VALIDATION_CURRENT_FOLDER: 0
   CROSS_VALIDATION_RANDOM_SEED: 37
 
-  NUM_CLASSES: 16
+  NUM_CLASSES: 7
   TARGET_SIZE:
     - 64
     - 160
     - 160
 
   # data normalization
-  INTENSITY_MIN: -676.25
-  INTENSITY_MAX: 200.595
-  INTENSITY_CLIP: true
+  INTENSITY_MIN: -1000
+  INTENSITY_MAX: 1000
+  INTENSITY_CLIP: false
 
   # data augmentation
   RAND_AFFINE:
@@ -70,7 +70,7 @@ MODEL:
     NAME: 'SegResNet_monai'
     DIMENSIONS: 3
     INITIAL_FILTERS: 32
-    OUTPUT_CHANNELS: 16
+    OUTPUT_CHANNELS: 7
     NORM:
       - 'INSTANCE'
       - { affine: true }

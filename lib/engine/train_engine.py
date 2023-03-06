@@ -35,7 +35,7 @@ def do_train(train_loader,
 
         # validation
         if indicator_dict['current_iteration'] % cfg.VAL.EVALUATION_FREQUENCY == 0:
-            if True:
+            if False:
                 indicator_dict['current_performance'] = do_validate(val_loader, model, cfg, visualize, writer_dict,
                                                                     final_output_dir)
             indicator_dict['is_best'] = False
@@ -59,14 +59,13 @@ def do_train(train_loader,
         # train
         is_success = model.set_dataset(current_data)
         if is_success == -1:
-            logging.info('Failed to setup current training sample: {}.'
-                         'Go to next one ...'.format(current_data['path'][0]))
+            model.logger.info('Failed to setup current training sample: {}.'
+                              'Go to next one ...'.format(current_data['path'][0]))
             continue
 
         is_success = model.optimize_parameters()
         if is_success == -1:
-            logging.info(
-                'Failed to update the model parameters: {}. Go to next one ...'.format(current_data['path'][0]))
+            model.logger.info('Failed to update the model parameters: {}. Go to next one ...'.format(current_data['path'][0]))
             continue
 
         # visualize
