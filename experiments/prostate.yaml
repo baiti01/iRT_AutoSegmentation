@@ -78,6 +78,12 @@ MODEL:
     BLOCKS_UP: (1, 1, 1, 1)
     UPSAMPLE_MODE: 'deconv'
 
+    DROPOUT_BLOCK:
+      IS_ENABLED: true
+      DROP_PROB: 0.1
+      DROP_BLOCK_SIZE: 5
+
+
 CRITERION:
   PIXEL_WISE_LOSS_TYPE: 'ClassSpatialMaskedDiceLossCustomized'
   IS_CE: false # if you want to use combined CE loss, you should modify the code a little bit since my customized Dice loss uses sigmoid as the activation function instead of softmax.

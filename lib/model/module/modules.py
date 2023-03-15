@@ -5,6 +5,10 @@
 # DATETIME: 10/14/2019 4:16 PM
 # FILE: modules.py
 
+import torch.nn as nn
+from dropblock import DropBlock3D
+
+
 def pixel_unshuffle(x, upscale_factor=2):
     dimension = 2 if len(x.shape) == 4 else 3
     if dimension == 2:
@@ -36,6 +40,18 @@ def pixel_shuffle(input, upscale_factor=2):
     shuffle_out = input_view.permute(0, 1, *(indicies[::-1])).contiguous()
 
     return shuffle_out.view(input_size[0], input_size[1], *output_size)
+
+
+def add_dropblock_layer(model, block_size=5, drop_prob=0.2):
+    for child_name, child_module in model.named_children():
+        if isinstance(child_module, nn.Conv3d) and child_module.kernel_size != (1, 1, 1):
+            new_child_module = nn.Sequential(
+                child_module,
+                DropBlock3D(block_size=block_size, drop_prob=drop_prob)
+            )
+            setattr(model, child_name, new_child_module)
+        else:
+            add_dropblock_layer(child_module, block_size, drop_prob)
 
 
 if __name__ == '__main__':

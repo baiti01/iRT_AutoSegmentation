@@ -39,6 +39,11 @@ def define_generator(generator_config):
     else:
         raise ('Unsupported network: {}'.format(generator_name))
 
+    if hasattr(generator_config, 'DROPOUT_BLOCK') and generator_config.DROPOUT_BLOCK.IS_ENABLED:
+        from lib.model.module.modules import add_dropblock_layer
+        add_dropblock_layer(network,
+                            block_size=generator_config.DROPOUT_BLOCK.DROP_BLOCK_SIZE,
+                            drop_prob=generator_config.DROPOUT_BLOCK.DROP_PROB)
     network = network.to('cuda' if torch.cuda.is_available() else 'cpu')
     return network
 
